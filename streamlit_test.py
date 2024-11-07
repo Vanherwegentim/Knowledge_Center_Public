@@ -2,7 +2,7 @@ import streamlit as st
 import os
 import pickle
 from db_client import get_query_embeddings, get_cloud_client
-from llama_index.llms.openai import OpenAI
+from openai import OpenAI
 import time
 import streamlit_analytics2
 from google.cloud import firestore
@@ -12,6 +12,8 @@ import re
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.core import VectorStoreIndex
 from llama_index.core import Settings
+from llama_index.core.memory import ChatMemoryBuffer
+from llama_index.core.retrievers import VectorIndexRetriever
 
 from llama_index.embeddings.openai import (
     OpenAIEmbedding,
@@ -47,24 +49,39 @@ def create_db_connection():
 cloud_aws_vector_store = create_db_connection()
 @st.cache_resource
 def vector_store_index(_cloud_aws_vector_store):
+    
     index = VectorStoreIndex.from_vector_store(cloud_aws_vector_store,embed_model=OpenAIEmbedding(mode=OpenAIEmbeddingMode.SIMILARITY_MODE, model=OpenAIEmbeddingModelType.TEXT_EMBED_3_SMALL, dimensions=756))
     return index
 
 index = vector_store_index(cloud_aws_vector_store)
 
+# @st.cache_resource
+# def create_chat_engine():
+#     memory = ChatMemoryBuffer.from_defaults(token_limit=1000)
+
+#     llm = OpenAI(model="gpt-4o", temperature=0.01)
+#     chat_engine = index.as_chat_engine(llm=llm, system_prompt = '''
+# GEBRUIK ALTIJD DE query_engine_tool OM TE ANTWOORDEN!!!
+# BEANTWOORD ENKEL DE VRAAG ALS HET EEN FINANCIELE VRAAG IS!
+# BEANTWOORD ENKEL ALS DE VRAAG RELEVANTE CONTEXT HEEFT!!
+# Maak je antwoord overzichtelijk met opsommingstekens indien nodig.
+# Jij bent een vertrouwd financieel expert in België die mensen helpt met perfect advies.
+# GEEF VOLDOENDE INFORMATIE!
+# ''',     similarity_top_k=10,
+#     verbose=True)
+#     return chat_engine
+# chat_engine = create_chat_engine()
+
 @st.cache_resource
-def create_chat_engine():
-    llm = OpenAI(model="gpt-4o", temperature=0)
-    chat_engine = index.as_chat_engine(llm=llm, system_prompt = '''
-Het is jouw taak om een feitelijk antwoord op de gesteld vraag op basis van de gegeven context en wat je weet zelf weet.
-BEANTWOORD ENKEL DE VRAAG ALS HET EEN FINANCIELE VRAAG IS!
-BEANTWOORD ENKEL ALS DE VRAAG RELEVANTE CONTEXT HEEFT!!
-Maak je antwoord overzichtelijk met opsommingstekens indien nodig.
-Jij bent een vertrouwd financieel expert in België die mensen helpt met perfect advies.
-GEEF VOLDOENDE INFORMATIE!
-''')
-    return chat_engine
-chat_engine = create_chat_engine()
+def create_retriever():
+    retriever = VectorIndexRetriever(
+        index=index,
+        similarity_top_k=10,
+)
+    return retriever
+
+retriever = create_retriever()
+
 
 #CSS injection that makes the user input right-aligned
 st.markdown(
@@ -205,18 +222,21 @@ if st.session_state["active_section"] == "Chatbot":
             st.markdown(prompt)
 
         with st.chat_message("assistant", avatar="images/thumbnail.png"):
-            # mess = create_llm_prompt(prompt, get_query_embeddings(milvus_client, prompt, COLLECTION_NAME))
-            # st.session_state.messages.append({"role": "system", "content": mess})
-            # stream = client.chat.completions.create(
-            #     model=st.session_state["openai_model"],
-            #     messages=[
-            #         {"role": m["role"], "content": m["content"]}
-            #         for m in st.session_state.messages[-5:]
-            #     ],
-            #     stream=True,
-            # )
-            stream = chat_engine.stream_chat(prompt)
-            response = st.write_stream(stream.response_gen)
+            response = retriever.retrieve("Mijn echtgenoot is overleden dit jaar, welke codes moeten er nog ingevuld worden?")
+            mess = ""
+            for x in response:
+                mess = mess + x.text
+            st.session_state.messages.append({"role": "system", "content": mess})
+            stream = client.chat.completions.create(
+                model=st.session_state["openai_model"],
+                messages=[
+                    {"role": m["role"], "content": m["content"]}
+                    for m in st.session_state.messages[-5:]
+                ],
+                stream=True,
+            )
+            
+            response = st.write_stream(stream)
         st.session_state.messages.append({"role": "assistant", "content": response})
 
 # If Upload Files is selected
