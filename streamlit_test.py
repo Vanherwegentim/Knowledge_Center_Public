@@ -2,14 +2,21 @@ import streamlit as st
 import os
 import pickle
 from db_client import get_query_embeddings, get_cloud_client
-from openai import OpenAI
+from llama_index.llms.openai import OpenAI
 import time
 import streamlit_analytics2
 from google.cloud import firestore
 import json
 import pandas as pd
 import re
+from llama_index.vector_stores.postgres import PGVectorStore
+from llama_index.core import VectorStoreIndex
 
+from llama_index.embeddings.openai import (
+    OpenAIEmbedding,
+    OpenAIEmbeddingMode,
+    OpenAIEmbeddingModelType,
+)
 
 st.set_page_config(layout="wide", page_title="Fintrax Knowledge Center", page_icon="images/FINTRAX_EMBLEM_POS@2x_TRANSPARENT.png")
 
@@ -17,9 +24,50 @@ st.set_page_config(layout="wide", page_title="Fintrax Knowledge Center", page_ic
 
 # Set up OpenAI client
 OPENAI_API_KEY = st.secrets['OPENAI_API_KEY']
-COLLECTION_NAME = "openai_vectors"  # Milvus collection name
 client = OpenAI(api_key=OPENAI_API_KEY)
-milvus_client = get_cloud_client()
+cloud_host = st.secrets["db_host"]
+cloud_port = st.secrets["db_port"]
+cloud_db_name = st.secrets["db_name"]
+cloud_db_pwd = st.secrets["db_pwd"]
+cloud_db_user = st.secrets["db_user"]
+
+@st.cache_resource
+def create_db_connection():
+    cloud_aws_vector_store = PGVectorStore.from_params(
+        database=cloud_db_name,
+        host=cloud_host,
+        password=cloud_db_pwd,
+        port=cloud_port,
+        user=cloud_db_user,
+        table_name="800_chunk_400_overlap",
+        embed_dim=756,  # openai embedding dimension
+    )
+    return cloud_aws_vector_store
+cloud_aws_vector_store = create_db_connection()
+
+@st.cache_resource
+def vector_store_index(_cloud_aws_vector_store):
+    index = VectorStoreIndex.from_vector_store(cloud_aws_vector_store,embed_model=OpenAIEmbedding(mode=OpenAIEmbeddingMode.SIMILARITY_MODE, model=OpenAIEmbeddingModelType.TEXT_EMBED_3_SMALL, dimensions=756))
+    return index
+
+index = vector_store_index(cloud_aws_vector_store)
+
+@st.cache_resource
+def create_chat_engine():
+    llm = OpenAI(model="gpt-4o", temperature=0,
+             system_prompt="""Het is jouw taak om een feitelijk antwoord op de gesteld vraag op basis van de gegeven context en wat je weet zelf weet.
+BEANTWOORD ENKEL DE VRAAG ALS HET EEN FINANCIELE VRAAG IS!
+BEANTWOORD ENKEL ALS DE VRAAG RELEVANTE CONTEXT HEEFT!!
+Als de context codes of vakken bevatten, moet de focus op de codes en vakken liggen.
+Je antwoord MAG NIET iets zeggen als “volgens de passage” of “context”.
+Maak je antwoord overzichtelijk met opsommingstekens indien nodig.
+Jij bent een vertrouwd financieel expert in België die mensen helpt met perfect advies.
+GEEF VOLDOENDE INFORMATIE!
+             """)
+
+    chat_engine = index.as_chat_engine(llm=llm)
+    return chat_engine
+chat_engine = create_chat_engine()
 
 #CSS injection that makes the user input right-aligned
 st.markdown(
@@ -60,7 +108,7 @@ def popup():
         st.toast("Vul aub een emailadres in.")
 
 
-with st.sidebar.container(border=True):
+with st.sidebar.container():
     sidecol1, sidecol2, sidecode3 = st.columns(3)
     sidecol2.title("Acties")
 
@@ -160,17 +208,18 @@ if st.session_state["active_section"] == "Chatbot":
             st.markdown(prompt)
 
         with st.chat_message("assistant", avatar="images/thumbnail.png"):
-            mess = create_llm_prompt(prompt, get_query_embeddings(milvus_client, prompt, COLLECTION_NAME))
-            st.session_state.messages.append({"role": "system", "content": mess})
-            stream = client.chat.completions.create(
-                model=st.session_state["openai_model"],
-                messages=[
-                    {"role": m["role"], "content": m["content"]}
-                    for m in st.session_state.messages[-5:]
-                ],
-                stream=True,
-            )
-            response = st.write_stream(stream)
+            # mess = create_llm_prompt(prompt, get_query_embeddings(milvus_client, prompt, COLLECTION_NAME))
+            # st.session_state.messages.append({"role": "system", "content": mess})
+            # stream = client.chat.completions.create(
+            #     model=st.session_state["openai_model"],
+            #     messages=[
+            #         {"role": m["role"], "content": m["content"]}
+            #         for m in st.session_state.messages[-5:]
+            #     ],
+            #     stream=True,
+            # )
+            stream = chat_engine.stream_chat(prompt)
+            response = st.write_stream(stream.response_gen)
         st.session_state.messages.append({"role": "assistant", "content": response})
 
 # If Upload Files is selected
