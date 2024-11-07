@@ -2,3 +2,8 @@ openai
 pymilvus
 streamlit-analytics2
 google-cloud-firestore
+streamlit_authenticator
+PyYAML
+llama-index
+django
+llama-index-vector-stores-postgres
