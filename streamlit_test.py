@@ -11,6 +11,7 @@ import pandas as pd
 import re
 from llama_index.vector_stores.postgres import PGVectorStore
 from llama_index.core import VectorStoreIndex
+from llama_index.core import Settings
 
 from llama_index.embeddings.openai import (
     OpenAIEmbedding,
@@ -44,7 +45,6 @@ def create_db_connection():
     )
     return cloud_aws_vector_store
 cloud_aws_vector_store = create_db_connection()
-
 @st.cache_resource
 def vector_store_index(_cloud_aws_vector_store):
     index = VectorStoreIndex.from_vector_store(cloud_aws_vector_store,embed_model=OpenAIEmbedding(mode=OpenAIEmbeddingMode.SIMILARITY_MODE, model=OpenAIEmbeddingModelType.TEXT_EMBED_3_SMALL, dimensions=756))
@@ -54,18 +54,15 @@ index = vector_store_index(cloud_aws_vector_store)
 
 @st.cache_resource
 def create_chat_engine():
-    llm = OpenAI(model="gpt-4o", temperature=0,
-             system_prompt="""Het is jouw taak om een feitelijk antwoord op de gesteld vraag op basis van de gegeven context en wat je weet zelf weet.
+    llm = OpenAI(model="gpt-4o", temperature=0)
+    chat_engine = index.as_chat_engine(llm=llm, system_prompt = '''
+Het is jouw taak om een feitelijk antwoord op de gesteld vraag op basis van de gegeven context en wat je weet zelf weet.
 BEANTWOORD ENKEL DE VRAAG ALS HET EEN FINANCIELE VRAAG IS!
 BEANTWOORD ENKEL ALS DE VRAAG RELEVANTE CONTEXT HEEFT!!
-Als de context codes of vakken bevatten, moet de focus op de codes en vakken liggen.
-Je antwoord MAG NIET iets zeggen als “volgens de passage” of “context”.
 Maak je antwoord overzichtelijk met opsommingstekens indien nodig.
 Jij bent een vertrouwd financieel expert in België die mensen helpt met perfect advies.
 GEEF VOLDOENDE INFORMATIE!
-             """)
-
-    chat_engine = index.as_chat_engine(llm=llm)
+''')
     return chat_engine
 chat_engine = create_chat_engine()
 
