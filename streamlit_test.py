@@ -42,7 +42,7 @@ def create_db_connection():
         password=cloud_db_pwd,
         port=cloud_port,
         user=cloud_db_user,
-        table_name="800_chunk_400_overlap",
+        table_name="standard",
         embed_dim=756,  # openai embedding dimension
     )
     return cloud_aws_vector_store
@@ -222,7 +222,7 @@ if st.session_state["active_section"] == "Chatbot":
             st.markdown(prompt)
 
         with st.chat_message("assistant", avatar="images/thumbnail.png"):
-            response = retriever.retrieve("Mijn echtgenoot is overleden dit jaar, welke codes moeten er nog ingevuld worden?")
+            response = retriever.retrieve(prompt)
             mess = ""
             for x in response:
                 mess = mess + x.text
