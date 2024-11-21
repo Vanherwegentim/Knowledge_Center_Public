@@ -22,6 +22,9 @@ from llama_index.embeddings.openai import (
 )
 
 st.set_page_config(layout="wide", page_title="Fintrax Knowledge Center", page_icon="images/FINTRAX_EMBLEM_POS@2x_TRANSPARENT.png")
+# Ensure all necessary session state variables are initialized
+if "state_dict" not in st.session_state:
+    st.session_state["state_dict"] = {}
 
 # Load environment variables
 
